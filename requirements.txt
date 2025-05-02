@@ -1,0 +1,9 @@
+Flask
+boto3
+pandas
+google-api-python-client
+google-auth
+matplotlib
+google-auth-oauthlib
+gunicorn
+plotly

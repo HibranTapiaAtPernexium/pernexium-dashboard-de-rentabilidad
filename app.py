@@ -1,25 +1,21 @@
 ######################################### LIBRERIAS ############################################
 
-import os
 import json
 import boto3
 import pandas as pd
+from google.oauth2 import service_account   
 from googleapiclient.discovery import build
 from matplotlib.colors import to_rgb, to_hex
 from flask import Flask, request, render_template
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 
 ######################################## CREDENCIALES ###########################################
 
-AWS_ACCESS_KEY         = os.getenv("AWS_ACCESS_KEY")
-AWS_SECRET_KEY         = os.getenv("AWS_SECRET_KEY")
-S3_BUCKET              = os.getenv("S3_BUCKET")
-S3_CLIENT_SECRETS_KEY  = os.getenv("S3_CLIENT_SECRETS_KEY")
-S3_TOKEN_KEY           = os.getenv("S3_TOKEN_KEY")
+S3_SA_KEY              = os.getenv("S3_SA_KEY")
 SHEET_ID               = os.getenv("SHEET_ID")
 SCOPES                 = os.getenv("SCOPES").split(",")
+S3_BUCKET              = os.getenv("S3_BUCKET")
+AWS_ACCESS_KEY         = os.getenv("AWS_ACCESS_KEY")
+AWS_SECRET_KEY         = os.getenv("AWS_SECRET_KEY")
 
 ####################################### CLIENTE DE AWS ##########################################
 
@@ -27,52 +23,31 @@ s3 = boto3.client("s3",aws_access_key_id=AWS_ACCESS_KEY,aws_secret_access_key=AW
 
 #################################### ACCEDER A GOOGLE SHEETS ####################################
 
-def load_oauth_client_config_from_s3():
-    obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_CLIENT_SECRETS_KEY)
-    return json.loads(obj["Body"].read().decode())
-
-def load_token_from_s3():
-    try:
-        obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_TOKEN_KEY)
-        info = json.loads(obj["Body"].read().decode())
-        return Credentials.from_authorized_user_info(info, SCOPES)
-    except s3.exceptions.NoSuchKey:
-        return None
-
-def save_token_to_s3(creds: Credentials):
-    s3.put_object(Bucket=S3_BUCKET,Key=S3_TOKEN_KEY,Body=creds.to_json().encode())
-
-def get_oauth_credentials():
-    cfg   = load_oauth_client_config_from_s3()
-    creds = load_token_from_s3()
-    if creds and creds.valid:
-        return creds
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        save_token_to_s3(creds)
-        return creds
-    flow  = InstalledAppFlow.from_client_config(cfg, SCOPES)
-    creds = flow.run_local_server(port=8080, prompt="consent", access_type="offline")
-    save_token_to_s3(creds)
-    return creds
+def get_service_account_credentials():
+    """Carga la clave de la cuenta de servicio desde S3 y devuelve un objeto Credentials."""
+    obj      = s3.get_object(Bucket=S3_BUCKET, Key=S3_SA_KEY)
+    sa_info  = json.loads(obj["Body"].read().decode())
+    creds_sa = service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
+    return creds_sa
 
 def build_sheets_service():
-    creds = get_oauth_credentials()
+    creds = get_service_account_credentials()
     return build("sheets", "v4", credentials=creds)
 
 def fetch_sheet_data(service, sheet_name):
     rng  = f"{sheet_name}!A1:Z1000"
-    vals = service.spreadsheets().values().get(
-        spreadsheetId=SHEET_ID, range=rng
-    ).execute().get("values", [])
+    vals = (service.spreadsheets().values()
+            .get(spreadsheetId=SHEET_ID, range=rng)
+            .execute()
+            .get("values", []))
 
     if len(vals) < 2:
         return pd.DataFrame()
 
     raw_headers = vals[1]
-    headers = [str(h).strip() for h in raw_headers]
-    data_rows = vals[2:]
-    max_cols = max(len(headers), *(len(r) for r in data_rows)) if data_rows else len(headers)
+    headers     = [str(h).strip() for h in raw_headers]
+    data_rows   = vals[2:]
+    max_cols    = max(len(headers), *(len(r) for r in data_rows)) if data_rows else len(headers)
     if len(headers) < max_cols:
         headers += [f"Col_{i}" for i in range(len(headers)+1, max_cols+1)]
     padded = [row + [None]*(max_cols - len(row)) for row in data_rows]
@@ -94,7 +69,10 @@ def index():
     start_month = request.args.get("start_date", "")
     end_month   = request.args.get("end_date", "")
 
-    df = dfs[selected_df].copy()
+    service = build_sheets_service()                
+    df      = fetch_sheet_data(service, selected_df)
+    dfs = {name: fetch_sheet_data(service, name) for name in DF_NAMES}
+    #df = dfs[selected_df].copy()
     
     ######################################## KPIs y GRAFICAS ########################################
     

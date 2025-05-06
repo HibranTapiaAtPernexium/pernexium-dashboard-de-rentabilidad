@@ -70,10 +70,10 @@ def index():
     start_month = request.args.get("start_date", "")
     end_month   = request.args.get("end_date", "")
 
-    service = build_sheets_service()                
-    df      = fetch_sheet_data(service, selected_df)
-    dfs = {name: fetch_sheet_data(service, name) for name in DF_NAMES}
-    #df = dfs[selected_df].copy()
+    #service = build_sheets_service()                                     # IF YOU WANT IT LIVE       
+    #df      = fetch_sheet_data(service, selected_df)                     # IF YOU WANT IT LIVE       
+    #dfs = {name: fetch_sheet_data(service, name) for name in DF_NAMES}   # IF YOU WANT IT LIVE       
+    df = dfs[selected_df].copy()                                          # IF YOU WANT IT TO REVIVE
     
     ######################################## KPIs y GRAFICAS ########################################
     
